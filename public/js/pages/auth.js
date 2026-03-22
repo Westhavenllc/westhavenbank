@@ -34,7 +34,7 @@ function applyTheme() {
 async function checkSession() {
     try {
         const s = await Auth.validateSession();
-        if (s) window.location.href = '/dashboard.html';
+        if (s) window.location.href = '/dashboard';
     } catch (_) {}
 }
 
@@ -124,7 +124,7 @@ async function handleLogin(e) {
     const result   = await Auth.login(email, password);
 
     if (result.success) {
-        window.location.href = '/dashboard.html';
+        window.location.href = '/dashboard';
     } else {
         showLoginError(result.error || 'Invalid email or password');
         if (btn) { btn.disabled = false; btn.innerHTML = orig; }
@@ -227,7 +227,7 @@ window.completeIndividualSignup = function() {
     }
     const btn = document.getElementById('indGoDashBtn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Going to dashboard…'; }
-    window.location.href = '/dashboard.html';
+    window.location.href = '/dashboard';
 };
 
 function resetIndividualForm() {
@@ -435,7 +435,7 @@ window.goToDashboard = function() {
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Going to dashboard…';
     }
-    window.location.href = '/dashboard.html';
+    window.location.href = '/dashboard';
 };
 
 // ── FORGOT PASSWORD ───────────────────────────

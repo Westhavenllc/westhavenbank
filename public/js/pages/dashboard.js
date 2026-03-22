@@ -19,7 +19,7 @@ async function initDashboard() {
     try {
         currentSession = await Auth.validateSession();
         if (!currentSession) {
-            window.location.href = '/auth.html';
+            window.location.href = '/auth';
             return;
         }
 
@@ -1712,7 +1712,7 @@ async function executeAccountDeletion() {
         await db.from('users').delete().eq('id', userId);
 
         localStorage.removeItem('West Haven_session');
-        window.location.href = '/auth.html';
+        window.location.href = '/auth';
     } catch (err) {
         console.error('executeAccountDeletion error:', err);
         showToast('Error deleting account: ' + err.message, 'error');
@@ -1745,7 +1745,7 @@ async function executeJointAccountDeletion(pendingAction) {
         await db.from('joint_accounts').delete().eq('id', jointId);
 
         localStorage.removeItem('West Haven_session');
-        window.location.href = '/auth.html';
+        window.location.href = '/auth';
     } catch (err) {
         console.error('executeJointAccountDeletion error:', err);
         showToast('Error deleting joint account: ' + err.message, 'error');

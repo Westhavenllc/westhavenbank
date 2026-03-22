@@ -147,7 +147,7 @@ const words = [
             console.error('logout error:', err);
         } finally {
             localStorage.removeItem('West Haven_session');
-            window.location.href = '/auth.html';
+            window.location.href = '/auth';
         }
     },
 
