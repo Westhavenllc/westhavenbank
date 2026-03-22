@@ -55,7 +55,7 @@ class HomePage {
         const authButtons = document.querySelector('.auth-buttons');
         if (authButtons) {
             authButtons.innerHTML = `
-                <a href="/dashboard.html" class="btn btn-outline">
+                <a href="/dashboard" class="btn btn-outline">
                     <i class="fas fa-tachometer-alt"></i>
                     Dashboard
                 </a>
