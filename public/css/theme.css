@@ -1,0 +1,271 @@
+/* West Haven Bank - Theme CSS */
+
+/* Light Theme Variables — Clean Ivory & Electric Blue */
+:root {
+    --bg-primary: #F5F7FE;
+    --bg-secondary: #EEF2FA;
+    --bg-tertiary: #E6ECF5;
+    --text-primary: #0A0A1F;
+    --text-secondary: #4A5568;
+    --text-tertiary: #7F8B9F;
+    --accent-primary: #6868f9;
+    --accent-secondary: #5A5AFB;
+    --success: #2C9A6E;
+    --warning: #5A5AFB;
+    --error: #E5484D;
+    --border: #E2E8F0;
+    --card-bg: #FFFFFF;
+    --shadow: rgba(0, 0, 0, 0.04) 0px 8px 24px 0px;
+}
+
+/* Dark Theme — Deep Space Navy & Electric Accents */
+[data-theme="dark"] {
+    --bg-primary: #020211;
+    --bg-secondary: #0A0A1A;
+    --bg-tertiary: #111122;
+    --text-primary: #F1F5F9;
+    --text-secondary: #B9C3D4;
+    --text-tertiary: #7E8AA2;
+    --accent-primary: #6868f9;
+    --accent-secondary: #5A5AFB;
+    --success: #3EBD84;
+    --warning: #F5A34C;
+    --error: #F96E72;
+    --border: #1F2A3A;
+    --card-bg: #0C0C1A;
+    --shadow: rgba(0, 0, 0, 0.6) 0px 12px 32px -8px;
+}
+
+/* Theme-specific component styles */
+[data-theme="dark"] .card {
+    background-color: var(--card-bg);
+}
+
+[data-theme="dark"] .form-input {
+    background-color: var(--bg-secondary);
+}
+
+[data-theme="dark"] .btn-outline {
+    background-color: transparent;
+}
+
+[data-theme="dark"] .btn-outline:hover {
+    background-color: var(--bg-tertiary);
+}
+
+[data-theme="dark"] .modal {
+    background-color: var(--card-bg);
+}
+
+[data-theme="dark"] .table tr:hover td {
+    background-color: var(--bg-tertiary);
+}
+
+/* Theme transition */
+body,
+.card,
+.btn,
+.form-input,
+.navbar,
+.modal,
+.table tr td {
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Custom scrollbar for dark theme */
+[data-theme="dark"] ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 5px;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+}
+
+/* Print styles */
+@media print {
+    [data-theme="dark"] {
+        --bg-primary: #ffffff;
+        --text-primary: #000000;
+        --border: #dddddd;
+    }
+    
+    .no-print {
+        display: none !important;
+    }
+    
+    .print-only {
+        display: block !important;
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    :root {
+        --accent-primary: #2525C9;
+        --text-primary: #000000;
+        --border: #000000;
+    }
+    
+    [data-theme="dark"] {
+        --accent-primary: #5A5AFB;
+        --text-primary: #ffffff;
+        --border: #ffffff;
+    }
+}
+
+/* Reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* RTL Support */
+[dir="rtl"] {
+    text-align: right;
+}
+
+[dir="rtl"] .ml-auto {
+    margin-left: 0;
+    margin-right: auto;
+}
+
+[dir="rtl"] .navbar .nav-links {
+    margin-right: 0;
+    margin-left: auto;
+}
+
+[dir="rtl"] .language-selector .lang-dropdown {
+    right: auto;
+    left: 0;
+}
+
+[dir="rtl"] .modal-footer {
+    justify-content: flex-start;
+}
+
+[dir="rtl"] .table th,
+[dir="rtl"] .table td {
+    text-align: right;
+}
+
+/* Focus styles for accessibility */
+:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
+/* Skip to content link for accessibility */
+.skip-to-content {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--accent-primary);
+    color: white;
+    padding: 8px 16px;
+    text-decoration: none;
+    z-index: 9999;
+}
+
+.skip-to-content:focus {
+    top: 0;
+}
+
+/* Loading skeleton animation */
+.skeleton {
+    background: linear-gradient(
+        90deg,
+        var(--bg-tertiary) 25%,
+        var(--border) 50%,
+        var(--bg-tertiary) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+}
+
+@keyframes skeleton-loading {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* Glass morphism effect */
+.glass {
+    background: rgba(245, 247, 254, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+[data-theme="dark"] .glass {
+    background: rgba(2, 2, 17, 0.6);
+    border: 1px solid rgba(31, 42, 58, 0.6);
+}
+
+/* Status colors */
+.status-active {
+    color: var(--success);
+    background-color: rgba(44, 154, 110, 0.1);
+}
+
+.status-pending {
+    color: var(--warning);
+    background-color: rgba(230, 138, 46, 0.1);
+}
+
+.status-blocked {
+    color: var(--error);
+    background-color: rgba(229, 72, 77, 0.1);
+}
+
+.status-approved {
+    color: var(--success);
+    background-color: rgba(44, 154, 110, 0.1);
+}
+
+.status-rejected {
+    color: var(--error);
+    background-color: rgba(229, 72, 77, 0.1);
+}
+
+/* Transaction status specific */
+.tx-completed { color: var(--success); }
+.tx-pending { color: var(--warning); }
+.tx-failed { color: var(--error); }
+
+/* Card type indicators */
+.card-standard {
+    border-left: 4px solid var(--accent-primary);
+}
+
+.card-elite {
+    border-left: 4px solid var(--warning);
+}
+
+/* Account type indicators */
+.account-single {
+    border-left: 4px solid var(--success);
+}
+
+.account-joint {
+    border-left: 4px solid var(--accent-primary);
+}
+
+/* Investment lock periods */
+.lock-short { color: var(--success); }
+.lock-medium { color: var(--warning); }
+.lock-long { color: var(--accent-primary); }
