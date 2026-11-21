@@ -32,6 +32,36 @@
     <link rel="stylesheet" href="css/pages/auth.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
+<style>
+/* Phrase grid */
+.phrase-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+.phrase-grid .phrase-cell { position: relative; }
+.phrase-grid .phrase-num {
+    position: absolute;
+    top: 3px; left: 5px;
+    font-size: .58rem;
+    color: #9ca3af;
+    pointer-events: none;
+    line-height: 1;
+}
+.phrase-grid input {
+    width: 100%;
+    padding: 16px 4px 4px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: .78rem;
+    text-align: center;
+    background: #f9fafb;
+    color: #111827;
+    box-sizing: border-box;
+    outline: none;
+}
+.phrase-grid input:focus { border-color: #2563eb; background: #fff; }
+</style>
 <body>
 
 <!-- NAVBAR -->
@@ -218,7 +248,7 @@
             <!-- Step 2: Documents -->
             <div id="individualStep2" class="form-step">
                 <div class="form-group">
-                    <label class="form-label">Government ID</label>
+                    <label class="form-label">Government ID <span style="font-weight:normal;color:var(--text-secondary);font-size:.8rem;">(Optional)</span></label>
                     <div class="file-upload-area" onclick="triggerFileUpload('govId')">
                         <div class="file-upload-content">
                             <i class="fas fa-cloud-upload-alt"></i>
@@ -231,7 +261,7 @@
                     <div id="govIdPreview"></div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Profile Picture</label>
+                    <label class="form-label">Profile Picture <span style="font-weight:normal;color:var(--text-secondary);font-size:.8rem;">(Optional)</span></label>
                     <div class="file-upload-area" onclick="triggerFileUpload('profilePic')">
                         <div class="file-upload-content">
                             <i class="fas fa-camera"></i>
@@ -246,9 +276,28 @@
                 <div class="form-actions">
                     <button type="button" class="btn btn-outline" onclick="prevIndividualStep()">Back</button>
                     <button type="button" class="btn btn-primary" id="indCompleteBtn" onclick="processIndividualSignup()">
-                        Complete
+                        Complete &amp; Sign In <i class="fas fa-arrow-right"></i>
                     </button>
                 </div>
+            </div>
+
+            <!-- Step 3: Recovery Phrase -->
+            <div id="individualStep3" style="display:none;">
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Save this now.</strong> Your recovery phrase cannot be shown again.
+                </div>
+                <h3 style="margin:20px 0 8px;">Recovery Phrase</h3>
+                <div id="indRecoveryPhrase" class="recovery-phrase"></div>
+                <div class="form-group" style="margin-top:20px;">
+                    <label class="form-checkbox">
+                        <input type="checkbox" id="indConfirmSave">
+                        <span>I have saved my recovery phrase</span>
+                    </label>
+                </div>
+                <button class="btn btn-primary btn-block" id="indGoDashBtn" onclick="completeIndividualSignup()">
+                    Go to Dashboard
+                </button>
             </div>
         </div>
     </div>
@@ -315,7 +364,7 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Your Government ID</label>
+                        <label class="form-label">Your Government ID <span style="font-weight:normal;color:var(--text-secondary);font-size:.8rem;">(Optional)</span></label>
                         <div class="file-upload-area" onclick="triggerFileUpload('jointId1')">
                             <div class="file-upload-content">
                                 <i class="fas fa-cloud-upload-alt"></i>
@@ -328,7 +377,7 @@
                         <div id="jointId1Preview"></div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Your Profile Picture</label>
+                        <label class="form-label">Your Profile Picture <span style="font-weight:normal;color:var(--text-secondary);font-size:.8rem;">(Optional)</span></label>
                         <div class="file-upload-area" onclick="triggerFileUpload('jointPic1')">
                             <div class="file-upload-content">
                                 <i class="fas fa-camera"></i>
@@ -361,16 +410,21 @@
                 </form>
             </div>
 
-            <!-- OTP (shown after successful submit) -->
+            <!-- OTP + recovery (shown after successful submit) -->
             <div id="otpDisplay" style="display:none;">
                 <div class="alert alert-success" style="margin-bottom:20px;">
                     <i class="fas fa-check-circle"></i>
                     <strong>Account created!</strong> Share this OTP with the second holder:
                 </div>
                 <div id="jointOtp" class="otp-code"></div>
-                <p style="font-size:0.9rem;color:var(--text-secondary);margin:16px 0;text-align:center;">
-                    The second account holder must use this 6-digit OTP to complete their joint account registration.
-                </p>
+                <h3 style="margin:24px 0 8px;">Your Recovery Phrase</h3>
+                <div id="primaryPhrase" class="recovery-phrase"></div>
+                <div class="form-group" style="margin-top:16px;">
+                    <label class="form-checkbox">
+                        <input type="checkbox" id="primaryConfirmSave">
+                        <span>I have saved my recovery phrase and shared the OTP</span>
+                    </label>
+                </div>
                 <button class="btn btn-primary btn-block" id="primaryGoDashBtn" onclick="goToDashboard()">
                     Go to Dashboard &amp; Set PIN
                 </button>
@@ -468,7 +522,7 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Government ID</label>
+                    <label class="form-label">Government ID <span style="font-weight:normal;color:var(--text-secondary);font-size:.8rem;">(Optional)</span></label>
                     <div class="file-upload-area" onclick="triggerFileUpload('secondGovId')">
                         <div class="file-upload-content">
                             <i class="fas fa-cloud-upload-alt"></i>
@@ -481,7 +535,7 @@
                     <div id="secondGovIdPreview"></div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Profile Picture</label>
+                    <label class="form-label">Profile Picture <span style="font-weight:normal;color:var(--text-secondary);font-size:.8rem;">(Optional)</span></label>
                     <div class="file-upload-area" onclick="triggerFileUpload('secondProfilePic')">
                         <div class="file-upload-content">
                             <i class="fas fa-camera"></i>
@@ -498,15 +552,20 @@
                 </button>
             </form>
 
-            <!-- Registration completion (shown after success) -->
+            <!-- Recovery phrase (shown after success) -->
             <div id="secondUserSecurity" style="display:none;">
-                <div class="alert alert-success" style="margin-bottom:20px;">
-                    <i class="fas fa-check-circle"></i>
-                    <strong>Registration Complete!</strong> Your joint account is now active.
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Save this now.</strong> Your recovery phrase cannot be shown again.
                 </div>
-                <p style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:16px;text-align:center;">
-                    You can now proceed to your dashboard to set up your transaction PIN.
-                </p>
+                <h3 style="margin:20px 0 8px;">Your Recovery Phrase</h3>
+                <div id="secondRecovery" class="recovery-phrase"></div>
+                <div class="form-group" style="margin-top:16px;">
+                    <label class="form-checkbox">
+                        <input type="checkbox" id="secondConfirmSave">
+                        <span>I have saved my recovery phrase</span>
+                    </label>
+                </div>
                 <button class="btn btn-primary btn-block" id="secondGoDashBtn" onclick="goToDashboard()">
                     Go to Dashboard &amp; Set PIN
                 </button>
@@ -516,7 +575,7 @@
 </div>
 
 
-<!-- MODAL 6: Forgot Password (Standard Supabase Password Reset) -->
+<!-- MODAL 6: Forgot Password -->
 <div id="forgotModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
@@ -524,108 +583,28 @@
             <button class="modal-close" onclick="closeModal('forgotModal')">&times;</button>
         </div>
         <div class="modal-body">
-            <!-- Tabs for Email vs PIN Reset -->
-            <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:12px;">
-                <button type="button" class="btn btn-sm btn-primary" id="forgotTabEmail" onclick="switchForgotTab('email')" style="flex:1;">
-                    <i class="fas fa-envelope"></i> With Email Link
-                </button>
-                <button type="button" class="btn btn-sm btn-outline" id="forgotTabPin" onclick="switchForgotTab('pin')" style="flex:1;">
-                    <i class="fas fa-shield-alt"></i> With 4-Digit PIN
-                </button>
-            </div>
-
-            <!-- TAB 1: Reset with Email Link (Standard Supabase SMTP) -->
-            <div id="forgotEmailWrapper">
-                <p style="font-size:0.875rem;color:var(--text-secondary);margin-bottom:12px;">
-                    Enter your account email and we'll send you a password recovery link via Supabase Auth.
-                </p>
-                <div style="font-size:0.8rem;color:var(--text-secondary);background:var(--bg-secondary,#f1f5f9);padding:8px 12px;border-radius:6px;margin-bottom:14px;display:flex;align-items:center;gap:8px;border:1px solid var(--border,#e2e8f0);">
-                    <i class="fas fa-envelope-open-text" style="color:var(--primary,#0ea5e9);"></i>
-                    <span>Kindly check your spam/junk folder if the reset email doesn't appear in your inbox.</span>
+            <div id="forgotStep1">
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" id="resetEmail" class="form-input" placeholder="you@example.com">
                 </div>
-                <div id="forgotErrorMessage" style="display:none;margin-bottom:14px;"></div>
-                <form id="forgotPasswordForm" onsubmit="handleSendResetEmail(event)">
-                    <div class="form-group">
-                        <label class="form-label">Email</label>
-                        <input type="email" id="resetEmail" class="form-input" placeholder="you@example.com" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-block" id="sendResetBtn" style="margin-top:16px;">
-                        Send Reset Link
-                    </button>
-                </form>
-            </div>
-
-            <!-- TAB 2: Reset with PIN (Instant in-app reset fallback) -->
-            <div id="forgotPinWrapper" style="display:none;">
-                <p style="font-size:0.875rem;color:var(--text-secondary);margin-bottom:14px;">
-                    Enter your account email and your 4-digit transaction PIN to set a new password instantly.
-                </p>
-                <div id="forgotPinErrorMessage" style="display:none;margin-bottom:14px;"></div>
-                <form id="forgotPinForm" onsubmit="handleResetPasswordWithPin(event)">
-                    <div class="form-group">
-                        <label class="form-label">Email</label>
-                        <input type="email" id="pinResetEmail" class="form-input" placeholder="you@example.com" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">4-Digit Transaction PIN</label>
-                        <input type="password" id="pinResetPin" class="form-input pin-input" maxlength="4" inputmode="numeric" placeholder="••••" style="font-size:1.3rem;letter-spacing:.3rem;text-align:center;" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">New Password</label>
-                        <input type="password" id="pinResetNewPass" class="form-input" placeholder="Minimum 8 characters" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Confirm New Password</label>
-                        <input type="password" id="pinResetConfPass" class="form-input" placeholder="Confirm new password" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-block" id="pinResetSubmitBtn" style="margin-top:16px;">
-                        Reset Password Instantly
-                    </button>
-                </form>
-            </div>
-            <div id="forgotSuccessMessage" style="display:none;">
-                <div class="alert alert-success" style="margin-bottom:16px;">
-                    <i class="fas fa-check-circle"></i>
-                    <div>
-                        <strong>Reset link sent!</strong>
-                        <p style="margin:4px 0 0;font-size:0.875rem;">Check your email inbox for the password reset link.</p>
-                    </div>
+                <div class="form-group">
+                    <label class="form-label">Recovery Phrase (12 words — one per box)</label>
+                    <div id="forgotPhraseGrid" class="phrase-grid"></div>
                 </div>
-                <div style="background:var(--bg-secondary, #f8fafc);border:1px solid var(--border, #e2e8f0);border-radius:8px;padding:12px 14px;margin-bottom:16px;display:flex;align-items:flex-start;gap:10px;font-size:0.85rem;color:var(--text-secondary, #64748b);line-height:1.4;">
-                    <i class="fas fa-info-circle" style="color:var(--primary, #0ea5e9);margin-top:2px;"></i>
-                    <span><strong>Don't see the email?</strong> Kindly check your <strong>Spam</strong> or <strong>Junk</strong> folder in case the password reset link was filtered there.</span>
-                </div>
-                <button class="btn btn-outline btn-block" onclick="closeModal('forgotModal')">Close</button>
+                <button class="btn btn-primary btn-block" style="margin-top:16px;" onclick="verifyPhrase()">Verify Phrase</button>
             </div>
-        </div>
-    </div>
-</div>
-
-
-<!-- MODAL 7: Set New Password (Triggered via Supabase Reset Email Link) -->
-<div id="updatePasswordModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Set New Password</h2>
-            <button class="modal-close" onclick="closeModal('updatePasswordModal')">&times;</button>
-        </div>
-        <div class="modal-body">
-            <p style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:16px;">
-                Please enter and confirm your new password below.
-            </p>
-            <form id="updatePasswordForm" onsubmit="handleUpdatePassword(event)">
+            <div id="forgotStep2" style="display:none;">
                 <div class="form-group">
                     <label class="form-label">New Password</label>
-                    <input type="password" id="newPasswordInput" class="form-input" placeholder="Minimum 8 characters" required>
+                    <input type="password" id="newPassword" class="form-input">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Confirm New Password</label>
-                    <input type="password" id="confirmNewPasswordInput" class="form-input" placeholder="Confirm new password" required>
+                    <input type="password" id="confirmPassword" class="form-input">
                 </div>
-                <button type="submit" class="btn btn-primary btn-block" id="updatePasswordBtn" style="margin-top:16px;">
-                    Update Password
-                </button>
-            </form>
+                <button class="btn btn-primary btn-block" onclick="resetPassword()">Reset Password</button>
+            </div>
         </div>
     </div>
 </div>
