@@ -17,36 +17,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!window.Auth) { console.error('Auth not loaded'); return; }
     if (!window.db)   { console.error('Supabase not loaded'); return; }
 
-    const isRecovery = window.location.hash.includes('type=recovery') ||
-                       window.location.search.includes('type=recovery') ||
-                       window.location.hash.includes('access_token') ||
-                       window.location.search.includes('code=');
-
-    // Listen for Supabase password recovery link redirect immediately
-    if (window.db?.auth) {
-        window.db.auth.onAuthStateChange(async (event, session) => {
-            console.log('Supabase Auth State Change:', event);
-            if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && isRecovery)) {
-                openModal('updatePasswordModal');
-            }
-        });
-    }
-
     applyTheme();
     await loadCountries();
-
-    if (!isRecovery) {
-        await checkSession();
-    }
-
+    await checkSession();
     bindEvents();
     bindFileInputs();
-
-    if (isRecovery) {
-        setTimeout(() => {
-            openModal('updatePasswordModal');
-        }, 250);
-    }
 });
 
 function applyTheme() {
@@ -100,7 +75,8 @@ window.openModal = function(id) {
     m.classList.add('active');
     document.body.style.overflow = 'hidden';
 
-    if (id === 'forgotModal') { resetForgotForm(); }
+    // Build phrase grid when forgot modal opens
+    if (id === 'forgotModal') { resetForgotForm(); buildAuthPhraseGrid(); }
 };
 
 window.closeModal = function(id) {
@@ -111,12 +87,11 @@ window.closeModal = function(id) {
     document.getElementById('authContainer').style.pointerEvents = 'auto';
     document.body.style.overflow = '';
 
-    if (id === 'individualModal')      resetIndividualForm();
-    if (id === 'jointModal')           resetJointForm();
-    if (id === 'secondUserModal')      resetSecondUserForm();
-    if (id === 'forgotModal')          resetForgotForm();
-    if (id === 'updatePasswordModal')  resetUpdatePasswordForm();
-    if (id === 'otpVerifyModal')       document.getElementById('otpInput').value = '';
+    if (id === 'individualModal')  resetIndividualForm();
+    if (id === 'jointModal')       resetJointForm();
+    if (id === 'secondUserModal')  resetSecondUserForm();
+    if (id === 'forgotModal')      resetForgotForm();
+    if (id === 'otpVerifyModal')   document.getElementById('otpInput').value = '';
 };
 
 window.showModal = window.openModal;
@@ -223,11 +198,8 @@ function validateStep1() {
 }
 
 window.processIndividualSignup = async function() {
-    individualData.governmentId   = document.getElementById('govIdUrl').value;
-    individualData.profilePicture = document.getElementById('profilePicUrl').value;
-
-    if (!individualData.governmentId)   { alert('Please upload your government ID'); return; }
-    if (!individualData.profilePicture) { alert('Please upload your profile picture'); return; }
+    individualData.governmentId   = document.getElementById('govIdUrl')?.value || '';
+    individualData.profilePicture = document.getElementById('profilePicUrl')?.value || '';
 
     const btn = document.getElementById('indCompleteBtn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating account…'; }
@@ -235,16 +207,17 @@ window.processIndividualSignup = async function() {
     const result = await Auth.signUpIndividual(individualData);
 
     if (result.success) {
-        if (result.emailConfirmationRequired) {
-            alert('Account created! A confirmation link has been sent to your email. Please verify your email before signing in.');
-            closeModal('individualModal');
-        } else {
-            window.location.href = '/dashboard.html';
-        }
+        window.location.href = '/dashboard.html';
     } else {
         alert('Registration failed: ' + result.error);
         if (btn) { btn.disabled = false; btn.innerHTML = 'Complete'; }
     }
+};
+
+window.completeIndividualSignup = function() {
+    const btn = document.getElementById('indGoDashBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Going to dashboard…'; }
+    window.location.href = '/dashboard.html';
 };
 
 function resetIndividualForm() {
@@ -256,6 +229,7 @@ function resetIndividualForm() {
     clearUpload('profilePic');
     document.getElementById('individualStep1').classList.add('active');
     document.getElementById('individualStep2').classList.remove('active');
+    document.getElementById('individualStep3').style.display = 'none';
     document.querySelectorAll('#individualModal .step').forEach((d, i) => {
         d.classList.toggle('active', i === 0);
         d.classList.remove('completed');
@@ -281,9 +255,6 @@ async function handleJointSubmit(e) {
         if (!document.getElementById(id)?.value) { alert('Please fill in all fields'); return; }
     }
 
-    if (!document.getElementById('jointId1Url').value)  { alert('Please upload your government ID'); return; }
-    if (!document.getElementById('jointPic1Url').value) { alert('Please upload your profile picture'); return; }
-
     const secondUserEmail = document.getElementById('jointEmail2').value.trim();
 
     const primaryData = {
@@ -295,8 +266,8 @@ async function handleJointSubmit(e) {
         gender:         document.getElementById('jointGender1').value,
         country:        document.getElementById('jointCountry1').options[
                             document.getElementById('jointCountry1').selectedIndex].text,
-        governmentId:   document.getElementById('jointId1Url').value,
-        profilePicture: document.getElementById('jointPic1Url').value
+        governmentId:   document.getElementById('jointId1Url')?.value || '',
+        profilePicture: document.getElementById('jointPic1Url')?.value || ''
     };
 
     const btn = document.getElementById('jointSubmitBtn');
@@ -308,6 +279,7 @@ async function handleJointSubmit(e) {
         document.getElementById('jointFormWrapper').style.display = 'none';
         document.getElementById('otpDisplay').style.display       = 'block';
         document.getElementById('jointOtp').textContent           = result.otp;
+        document.getElementById('primaryPhrase').textContent      = result.recoveryPhrase;
 
         const info = document.createElement('div');
         info.className = 'alert alert-info';
@@ -391,9 +363,6 @@ async function handleSecondUserSubmit(e) {
         if (!document.getElementById(id)?.value) { alert('Please fill in all fields'); return; }
     }
 
-    if (!document.getElementById('secondGovIdUrl').value)     { alert('Please upload your government ID'); return; }
-    if (!document.getElementById('secondProfilePicUrl').value) { alert('Please upload your profile picture'); return; }
-
     const userData = {
         firstName:      document.getElementById('secondFirstName').value,
         lastName:       document.getElementById('secondLastName').value,
@@ -403,8 +372,8 @@ async function handleSecondUserSubmit(e) {
         gender:         document.getElementById('secondGender').value,
         country:        document.getElementById('secondCountry').options[
                             document.getElementById('secondCountry').selectedIndex].text,
-        governmentId:   document.getElementById('secondGovIdUrl').value,
-        profilePicture: document.getElementById('secondProfilePicUrl').value
+        governmentId:   document.getElementById('secondGovIdUrl')?.value || '',
+        profilePicture: document.getElementById('secondProfilePicUrl')?.value || ''
     };
 
     const btn  = e.target.querySelector('button[type="submit"]');
@@ -414,13 +383,7 @@ async function handleSecondUserSubmit(e) {
     const result = await Auth.completeJointAccount(currentOTP, userData);
 
     if (result.success) {
-        if (result.emailConfirmationRequired) {
-            alert('Registration complete! Please check your email to confirm your account before signing in.');
-            closeModal('secondUserModal');
-        } else {
-            document.getElementById('secondUserForm').style.display     = 'none';
-            document.getElementById('secondUserSecurity').style.display = 'block';
-        }
+        window.location.href = '/dashboard.html';
     } else {
         alert('Registration failed: ' + result.error);
         if (btn) { btn.disabled = false; btn.innerHTML = orig; }
@@ -449,243 +412,47 @@ window.goToDashboard = function() {
     window.location.href = '/dashboard.html';
 };
 
-// ── FORGOT PASSWORD & SUPABASE PASSWORD RESET ──
+// ── FORGOT PASSWORD ───────────────────────────
 
-window.switchForgotTab = function(tab) {
-    const pinWrapper = document.getElementById('forgotPinWrapper');
-    const emailWrapper = document.getElementById('forgotEmailWrapper');
-    const tabPinBtn = document.getElementById('forgotTabPin');
-    const tabEmailBtn = document.getElementById('forgotTabEmail');
-    const succ = document.getElementById('forgotSuccessMessage');
+window.verifyPhrase = async function() {
+    const email  = (document.getElementById('resetEmail') || {}).value.trim();
+    const words  = getAuthPhraseWords();
+    const phrase = words.join(' ').trim();
+    if (!email)              { alert('Please enter your email'); return; }
+    if (words.some(w => !w)) { alert('Please fill in all 12 recovery words'); return; }
 
-    if (succ) succ.style.display = 'none';
-
-    if (tab === 'pin') {
-        if (pinWrapper) pinWrapper.style.display = 'block';
-        if (emailWrapper) emailWrapper.style.display = 'none';
-        if (tabPinBtn) {
-            tabPinBtn.classList.remove('btn-outline');
-            tabPinBtn.classList.add('btn-primary');
-        }
-        if (tabEmailBtn) {
-            tabEmailBtn.classList.remove('btn-primary');
-            tabEmailBtn.classList.add('btn-outline');
-        }
+    const result = await Auth.verifyRecoveryPhrase(email, phrase);
+    if (result.success) {
+        resetToken = result.resetToken;
+        document.getElementById('forgotStep1').style.display = 'none';
+        document.getElementById('forgotStep2').style.display = 'block';
     } else {
-        if (pinWrapper) pinWrapper.style.display = 'none';
-        if (emailWrapper) emailWrapper.style.display = 'block';
-        if (tabEmailBtn) {
-            tabEmailBtn.classList.remove('btn-outline');
-            tabEmailBtn.classList.add('btn-primary');
-        }
-        if (tabPinBtn) {
-            tabPinBtn.classList.remove('btn-primary');
-            tabPinBtn.classList.add('btn-outline');
-        }
+        alert(result.error);
     }
 };
 
-window.handleResetPasswordWithPin = async function(e) {
-    if (e) e.preventDefault();
-    const email = (document.getElementById('pinResetEmail')?.value || '').trim();
-    const pin = (document.getElementById('pinResetPin')?.value || '').trim();
-    const newPass = (document.getElementById('pinResetNewPass')?.value || '').trim();
-    const confPass = (document.getElementById('pinResetConfPass')?.value || '').trim();
-    const errEl = document.getElementById('forgotPinErrorMessage');
+window.resetPassword = async function() {
+    const np = document.getElementById('newPassword').value;
+    const cf = document.getElementById('confirmPassword').value;
+    if (!np || !cf)    { alert('Please fill in both fields'); return; }
+    if (np.length < 8) { alert('Password must be at least 8 characters'); return; }
+    if (np !== cf)     { alert('Passwords do not match'); return; }
 
-    if (errEl) { errEl.style.display = 'none'; errEl.innerHTML = ''; }
-
-    if (!email || !pin || !newPass || !confPass) {
-        alert('Please fill in all fields.');
-        return;
-    }
-    if (!/^\d{4}$/.test(pin)) {
-        if (errEl) {
-            errEl.style.display = 'block';
-            errEl.innerHTML = `
-                <div style="background:#fee2e2;border:1px solid #f87171;color:#b91c1c;padding:10px 14px;border-radius:8px;font-size:0.875rem;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-exclamation-circle"></i> <span>Transaction PIN must be exactly 4 digits.</span>
-                </div>`;
-        }
-        return;
-    }
-    if (newPass.length < 8) {
-        if (errEl) {
-            errEl.style.display = 'block';
-            errEl.innerHTML = `
-                <div style="background:#fee2e2;border:1px solid #f87171;color:#b91c1c;padding:10px 14px;border-radius:8px;font-size:0.875rem;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-exclamation-circle"></i> <span>Password must be at least 8 characters.</span>
-                </div>`;
-        }
-        return;
-    }
-    if (newPass !== confPass) {
-        if (errEl) {
-            errEl.style.display = 'block';
-            errEl.innerHTML = `
-                <div style="background:#fee2e2;border:1px solid #f87171;color:#b91c1c;padding:10px 14px;border-radius:8px;font-size:0.875rem;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-exclamation-circle"></i> <span>Passwords do not match.</span>
-                </div>`;
-        }
-        return;
-    }
-
-    const btn = document.getElementById('pinResetSubmitBtn');
-    const orig = btn?.innerHTML || 'Reset Password Instantly';
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Resetting…'; }
-
-    const result = await Auth.resetPasswordWithPin(email, pin, newPass);
-
+    const result = await Auth.resetPassword(resetToken, np);
     if (result.success) {
-        alert('Password reset successfully! You can now sign in with your new password.');
+        alert('Password reset! Please sign in with your new password.');
         closeModal('forgotModal');
-        // Prefill login email
-        const loginEmail = document.getElementById('loginEmail');
-        if (loginEmail) loginEmail.value = email;
-        const loginPass = document.getElementById('loginPassword');
-        if (loginPass) {
-            loginPass.value = '';
-            loginPass.focus();
-        }
     } else {
-        if (errEl) {
-            errEl.style.display = 'block';
-            errEl.innerHTML = `
-                <div style="background:#fee2e2;border:1px solid #f87171;color:#b91c1c;padding:10px 14px;border-radius:8px;font-size:0.875rem;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-exclamation-circle"></i> <span>${result.error}</span>
-                </div>`;
-        }
-        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
-    }
-};
-
-window.handleSendResetEmail = async function(e) {
-    if (e) e.preventDefault();
-    const emailInput = document.getElementById('resetEmail');
-    const email = (emailInput?.value || '').trim();
-    const errEl = document.getElementById('forgotErrorMessage');
-    if (errEl) { errEl.style.display = 'none'; errEl.innerHTML = ''; }
-
-    if (!email) { alert('Please enter your email address'); return; }
-
-    const btn = document.getElementById('sendResetBtn');
-    const orig = 'Send Reset Link';
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…'; }
-
-    const result = await Auth.sendPasswordResetEmail(email);
-
-    if (result.success) {
-        const emailWrapper = document.getElementById('forgotEmailWrapper') || document.getElementById('forgotFormWrapper');
-        if (emailWrapper) emailWrapper.style.display = 'none';
-        document.getElementById('forgotSuccessMessage').style.display = 'block';
-    } else {
-        if (errEl) {
-            errEl.style.display = 'block';
-            if (result.isRateLimit) {
-                errEl.innerHTML = `
-                    <div style="background:#fef3c7;border:1px solid #f59e0b;color:#92400e;padding:12px 14px;border-radius:8px;font-size:0.875rem;line-height:1.4;">
-                        <div style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:4px;">
-                            <i class="fas fa-exclamation-triangle"></i> Email Rate Limit Exceeded
-                        </div>
-                        <span>Too many reset requests have been sent recently. Supabase throttles email sending to protect against abuse. Please wait a few minutes before trying again, or check your spam/junk folder for previous links.</span>
-                    </div>`;
-            } else {
-                errEl.innerHTML = `
-                    <div style="background:#fee2e2;border:1px solid #f87171;color:#b91c1c;padding:10px 14px;border-radius:8px;font-size:0.875rem;display:flex;align-items:center;gap:8px;">
-                        <i class="fas fa-exclamation-circle"></i> <span>${result.error}</span>
-                    </div>`;
-            }
-        }
-
-        if (result.isRateLimit && btn) {
-            let countdown = 60;
-            btn.disabled = true;
-            btn.innerHTML = `<i class="fas fa-clock"></i> Retry in ${countdown}s`;
-            const timer = setInterval(() => {
-                countdown--;
-                if (countdown <= 0) {
-                    clearInterval(timer);
-                    btn.disabled = false;
-                    btn.innerHTML = orig;
-                } else {
-                    btn.innerHTML = `<i class="fas fa-clock"></i> Retry in ${countdown}s`;
-                }
-            }, 1000);
-        } else if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = orig;
-        }
-    }
-};
-
-window.handleUpdatePassword = async function(e) {
-    if (e) e.preventDefault();
-    const newPass = document.getElementById('newPasswordInput').value;
-    const confPass = document.getElementById('confirmNewPasswordInput').value;
-
-    if (!newPass || !confPass) {
-        alert('Please fill in both password fields');
-        return;
-    }
-    if (newPass.length < 8) {
-        alert('Password must be at least 8 characters');
-        return;
-    }
-    if (newPass !== confPass) {
-        alert('Passwords do not match');
-        return;
-    }
-
-    const btn = document.getElementById('updatePasswordBtn');
-    const orig = btn?.innerHTML;
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating…'; }
-
-    const result = await Auth.updatePassword(newPass);
-
-    if (result.success) {
-        alert('Password updated successfully! Please sign in with your new password.');
-        closeModal('updatePasswordModal');
-        if (window.history.replaceState) {
-            window.history.replaceState(null, null, window.location.pathname);
-        }
-        try { await window.db.auth.signOut(); } catch (_) {}
-    } else {
-        alert('Password update failed: ' + result.error);
-        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+        alert(result.error);
     }
 };
 
 function resetForgotForm() {
-    ['pinResetEmail', 'pinResetPin', 'pinResetNewPass', 'pinResetConfPass', 'resetEmail'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
+    ['resetEmail','newPassword','confirmPassword'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
     });
-    const pinErr = document.getElementById('forgotPinErrorMessage');
-    if (pinErr) { pinErr.style.display = 'none'; pinErr.innerHTML = ''; }
-    const pinBtn = document.getElementById('pinResetSubmitBtn');
-    if (pinBtn) { pinBtn.disabled = false; pinBtn.innerHTML = 'Reset Password Instantly'; }
-
-    const emailWrapper = document.getElementById('forgotEmailWrapper') || document.getElementById('forgotFormWrapper');
-    if (emailWrapper) emailWrapper.style.display = 'block';
-    const succ = document.getElementById('forgotSuccessMessage');
-    if (succ) succ.style.display = 'none';
-    const errEl = document.getElementById('forgotErrorMessage');
-    if (errEl) { errEl.style.display = 'none'; errEl.innerHTML = ''; }
-    const btn = document.getElementById('sendResetBtn');
-    if (btn) { btn.disabled = false; btn.innerHTML = 'Send Reset Link'; }
-
-    if (typeof window.switchForgotTab === 'function') {
-        window.switchForgotTab('email');
-    }
-}
-
-function resetUpdatePasswordForm() {
-    ['newPasswordInput', 'confirmNewPasswordInput'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
-    const btn = document.getElementById('updatePasswordBtn');
-    if (btn) { btn.disabled = false; btn.innerHTML = 'Update Password'; }
+    document.getElementById('forgotStep1').style.display = 'block';
+    document.getElementById('forgotStep2').style.display = 'none';
 }
 
 // ── FILE UPLOADS ──────────────────────────────
@@ -819,4 +586,38 @@ function fmtSize(b) {
     if (b < 1024)    return b + ' B';
     if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
     return (b / 1048576).toFixed(1) + ' MB';
+}
+
+// ── AUTH PHRASE GRID ──────────────────────────
+
+function buildAuthPhraseGrid() {
+    const container = document.getElementById('forgotPhraseGrid');
+    if (!container) return;
+    let html = '';
+    for (let i = 1; i <= 12; i++) {
+        html += `<div class="phrase-cell">
+            <span class="phrase-num">${i}</span>
+            <input type="text" id="authPhrase_${i}" autocomplete="off"
+                spellcheck="false" autocorrect="off" autocapitalize="off"
+                placeholder="word" onkeydown="authPhraseNav(event,${i})">
+        </div>`;
+    }
+    container.innerHTML = html;
+    setTimeout(() => document.getElementById('authPhrase_1')?.focus(), 100);
+}
+
+function authPhraseNav(e, idx) {
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        document.getElementById('authPhrase_' + (idx + 1))?.focus();
+    }
+}
+
+function getAuthPhraseWords() {
+    const words = [];
+    for (let i = 1; i <= 12; i++) {
+        const el = document.getElementById('authPhrase_' + i);
+        words.push(el ? el.value.trim().toLowerCase() : '');
+    }
+    return words;
 }
