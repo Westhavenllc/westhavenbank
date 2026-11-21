@@ -158,9 +158,6 @@ const words = [
 
     async logout() {
         try {
-            if (window.db?.auth) {
-                await window.db.auth.signOut();
-            }
             const sessionStr = localStorage.getItem('West Haven Bank_session');
             if (sessionStr) {
                 const { token } = JSON.parse(sessionStr);
@@ -178,65 +175,22 @@ const words = [
 
     async login(email, password) {
         try {
-            const cleanEmail = email.trim().toLowerCase();
+            const { data: users, error } = await window.db
+                .from('users').select('*').eq('email', email.trim().toLowerCase());
 
-            // 1. Authenticate with standard Supabase Auth
-            const { data: authData, error: authError } = await window.db.auth.signInWithPassword({
-                email: cleanEmail,
-                password: password
-            });
-
-            if (!authError && authData?.user) {
-                // Find profile in public.users
-                let { data: user } = await window.db
-                    .from('users').select('*').eq('id', authData.user.id).single();
-
-                if (!user) {
-                    const { data: userByEmail } = await window.db
-                        .from('users').select('*').eq('email', cleanEmail).single();
-                    user = userByEmail;
-                }
-
-                if (user) {
-                    await this.createSession(user.id);
-                    return { success: true, user, requiresPinSetup: !user.transaction_pin_hash };
-                }
+            if (error || !users?.length) {
+                return { success: false, error: 'Invalid email or password' };
             }
 
-            // 2. Backward compatibility fallback for legacy accounts with custom SHA-256
-            const { data: legacyUsers } = await window.db
-                .from('users').select('*').eq('email', cleanEmail);
+            const user = users[0];
+            const passwordHash = await this.hashPassword(password);
 
-            if (legacyUsers && legacyUsers.length > 0) {
-                const legacyUser = legacyUsers[0];
-                if (legacyUser.password_hash) {
-                    const legacyHash = await this.hashPassword(password);
-                    if (legacyHash === legacyUser.password_hash) {
-                        // Migrate legacy user to Supabase Auth on the fly
-                        try {
-                            await window.db.auth.signUp({
-                                email: cleanEmail,
-                                password: password
-                            });
-                        } catch (_) {}
-
-                        await this.createSession(legacyUser.id);
-                        return { success: true, user: legacyUser, requiresPinSetup: !legacyUser.transaction_pin_hash };
-                    }
-                }
+            if (passwordHash !== user.password_hash) {
+                return { success: false, error: 'Invalid email or password' };
             }
 
-            if (authError) {
-                if (authError.message?.toLowerCase().includes('email not confirmed')) {
-                    return {
-                        success: false,
-                        error: 'Your email has not been confirmed yet. Please check your inbox for the confirmation link.'
-                    };
-                }
-                return { success: false, error: authError.message };
-            }
-
-            return { success: false, error: 'Invalid email or password' };
+            await this.createSession(user.id);
+            return { success: true, user, requiresPinSetup: !user.transaction_pin_hash };
         } catch (err) {
             console.error('login error:', err);
             return { success: false, error: err.message };
@@ -247,46 +201,34 @@ const words = [
 
     async signUpIndividual(userData) {
         try {
-            const cleanEmail = userData.email.trim().toLowerCase();
+            const recoveryPhrase = this.generateRecoveryPhrase();
+            const [passwordHash, recoveryPhraseHash] = await Promise.all([
+                this.hashPassword(userData.password),
+                this.hashPassword(recoveryPhrase)
+            ]);
 
-            // 1. Supabase Auth signup (passwords managed securely by Supabase, never stored in DB)
-            const { data: authData, error: authError } = await window.db.auth.signUp({
-                email: cleanEmail,
-                password: userData.password,
-                options: {
-                    data: {
-                        first_name: userData.firstName,
-                        last_name: userData.lastName
-                    }
-                }
-            });
-
-            if (authError) throw authError;
-            if (!authData?.user) throw new Error('Failed to create authentication user.');
-
-            const userId = authData.user.id;
-
-            // 2. Store profile in public.users without collecting password or recovery phrase
-            const { data: user, error: userError } = await window.db.from('users').insert([{
-                id: userId,
-                email: cleanEmail,
-                password_hash: '', // Never collect password in database
-                recovery_phrase_hash: '', // No recovery phrase during auth
+            const nowIso = new Date().toISOString();
+            const { data: user, error } = await window.db.from('users').insert([{
+                email: userData.email.trim().toLowerCase(),
+                password_hash: passwordHash,
                 first_name: userData.firstName,
                 last_name: userData.lastName,
                 birth_date: userData.birthDate,
                 gender: userData.gender,
                 country: userData.country,
-                government_id_url: userData.governmentId,
-                profile_picture_url: userData.profilePicture,
+                government_id_url: userData.governmentId || '',
+                profile_picture_url: userData.profilePicture || '',
+                recovery_phrase_hash: recoveryPhraseHash,
                 transaction_pin_hash: null,
                 account_type: 'individual',
-                is_verified: true
+                is_verified: true,
+                email_confirmed_at: nowIso,
+                confirmed_at: nowIso
             }]).select().single();
 
-            if (userError) throw userError;
+            if (error) throw error;
 
-            // 3. Create personal bank account
+            // accounts constraint: user_id OR joint_account_id, never both
             const accountNumber = 'WH' + Date.now().toString().slice(-8) + Math.floor(Math.random() * 1000);
             await window.db.from('accounts').insert([{
                 account_number: accountNumber,
@@ -296,16 +238,8 @@ const words = [
                 status: 'active'
             }]);
 
-            const hasActiveSession = !!authData.session;
-            if (hasActiveSession) {
-                await this.createSession(user.id);
-            }
-
-            return {
-                success: true,
-                user,
-                emailConfirmationRequired: !hasActiveSession
-            };
+            await this.createSession(user.id);
+            return { success: true, user, recoveryPhrase };
         } catch (err) {
             console.error('signUpIndividual error:', err);
             return { success: false, error: err.message };
@@ -313,73 +247,58 @@ const words = [
     },
 
     // ---- JOINT SIGNUP — Primary user ----
+    // joint_accounts schema: id, primary_user_id, secondary_user_id,
+    //   account_name, status, invitation_otp, created_at, activated_at
+    // NOTE: no otp_expires_at column
 
     async initJointAccount(primaryUserData) {
         try {
-            const cleanEmail = primaryUserData.email.trim().toLowerCase();
-
-            // 1. Supabase Auth signup
-            const { data: authData, error: authError } = await window.db.auth.signUp({
-                email: cleanEmail,
-                password: primaryUserData.password,
-                options: {
-                    data: {
-                        first_name: primaryUserData.firstName,
-                        last_name: primaryUserData.lastName
-                    }
-                }
-            });
-
-            if (authError) throw authError;
-            if (!authData?.user) throw new Error('Failed to create authentication user.');
-
-            const userId = authData.user.id;
             const otp = this.generateOTP();
 
-            // 2. Create pending joint account
             const { data: jointAccount, error: jointError } = await window.db
                 .from('joint_accounts').insert([{
                     account_name: `${primaryUserData.firstName} & Partner`,
                     status: 'pending',
-                    invitation_otp: otp,
-                    primary_user_id: userId
+                    invitation_otp: otp
                 }]).select().single();
 
             if (jointError) throw jointError;
 
-            // 3. Store user record in public.users without collecting password or recovery phrase
+            const recoveryPhrase = this.generateRecoveryPhrase();
+            const [passwordHash, recoveryPhraseHash] = await Promise.all([
+                this.hashPassword(primaryUserData.password),
+                this.hashPassword(recoveryPhrase)
+            ]);
+
+            const nowIso = new Date().toISOString();
             const { data: primaryUser, error: userError } = await window.db
                 .from('users').insert([{
-                    id: userId,
-                    email: cleanEmail,
-                    password_hash: '', // Never collect password in database
-                    recovery_phrase_hash: '', // No recovery phrase during auth
+                    email: primaryUserData.email.trim().toLowerCase(),
+                    password_hash: passwordHash,
                     first_name: primaryUserData.firstName,
                     last_name: primaryUserData.lastName,
                     birth_date: primaryUserData.birthDate,
                     gender: primaryUserData.gender,
                     country: primaryUserData.country,
-                    government_id_url: primaryUserData.governmentId,
-                    profile_picture_url: primaryUserData.profilePicture,
+                    government_id_url: primaryUserData.governmentId || '',
+                    profile_picture_url: primaryUserData.profilePicture || '',
+                    recovery_phrase_hash: recoveryPhraseHash,
                     transaction_pin_hash: null,
                     account_type: 'joint',
                     joint_account_id: jointAccount.id,
-                    is_verified: true
+                    is_verified: true,
+                    email_confirmed_at: nowIso,
+                    confirmed_at: nowIso
                 }]).select().single();
 
             if (userError) throw userError;
 
-            const hasActiveSession = !!authData.session;
-            if (hasActiveSession) {
-                await this.createSession(primaryUser.id);
-            }
+            await window.db.from('joint_accounts')
+                .update({ primary_user_id: primaryUser.id })
+                .eq('id', jointAccount.id);
 
-            return {
-                success: true,
-                otp,
-                jointAccountId: jointAccount.id,
-                emailConfirmationRequired: !hasActiveSession
-            };
+            await this.createSession(primaryUser.id);
+            return { success: true, otp, recoveryPhrase, jointAccountId: jointAccount.id };
         } catch (err) {
             console.error('initJointAccount error:', err);
             return { success: false, error: err.message };
@@ -390,8 +309,6 @@ const words = [
 
     async completeJointAccount(otp, userData) {
         try {
-            const cleanEmail = userData.email.trim().toLowerCase();
-
             const { data: jointAccount, error: jointError } = await window.db
                 .from('joint_accounts')
                 .select('*')
@@ -403,41 +320,31 @@ const words = [
                 return { success: false, error: 'Invalid or expired OTP' };
             }
 
-            // 1. Supabase Auth signup
-            const { data: authData, error: authError } = await window.db.auth.signUp({
-                email: cleanEmail,
-                password: userData.password,
-                options: {
-                    data: {
-                        first_name: userData.firstName,
-                        last_name: userData.lastName
-                    }
-                }
-            });
+            const recoveryPhrase = this.generateRecoveryPhrase();
+            const [passwordHash, recoveryPhraseHash] = await Promise.all([
+                this.hashPassword(userData.password),
+                this.hashPassword(recoveryPhrase)
+            ]);
 
-            if (authError) throw authError;
-            if (!authData?.user) throw new Error('Failed to create authentication user.');
-
-            const userId = authData.user.id;
-
-            // 2. Store profile without password or recovery phrase
+            const nowIso = new Date().toISOString();
             const { data: secondaryUser, error: userError } = await window.db
                 .from('users').insert([{
-                    id: userId,
-                    email: cleanEmail,
-                    password_hash: '', // Never collect password in database
-                    recovery_phrase_hash: '', // No recovery phrase during auth
+                    email: userData.email.trim().toLowerCase(),
+                    password_hash: passwordHash,
                     first_name: userData.firstName,
                     last_name: userData.lastName,
                     birth_date: userData.birthDate,
                     gender: userData.gender,
                     country: userData.country,
-                    government_id_url: userData.governmentId,
-                    profile_picture_url: userData.profilePicture,
+                    government_id_url: userData.governmentId || '',
+                    profile_picture_url: userData.profilePicture || '',
+                    recovery_phrase_hash: recoveryPhraseHash,
                     transaction_pin_hash: null,
                     account_type: 'joint',
                     joint_account_id: jointAccount.id,
-                    is_verified: true
+                    is_verified: true,
+                    email_confirmed_at: nowIso,
+                    confirmed_at: nowIso
                 }]).select().single();
 
             if (userError) throw userError;
@@ -448,7 +355,7 @@ const words = [
                 activated_at: new Date().toISOString()
             }).eq('id', jointAccount.id);
 
-            // 3. Create shared joint account
+            // accounts constraint: joint_account_id only, no user_id
             const accountNumber = 'WHJ' + Date.now().toString().slice(-8) + Math.floor(Math.random() * 1000);
             await window.db.from('accounts').insert([{
                 account_number: accountNumber,
@@ -458,15 +365,8 @@ const words = [
                 status: 'active'
             }]);
 
-            const hasActiveSession = !!authData.session;
-            if (hasActiveSession) {
-                await this.createSession(secondaryUser.id);
-            }
-
-            return {
-                success: true,
-                emailConfirmationRequired: !hasActiveSession
-            };
+            await this.createSession(secondaryUser.id);
+            return { success: true, recoveryPhrase };
         } catch (err) {
             console.error('completeJointAccount error:', err);
             return { success: false, error: err.message };
@@ -501,120 +401,62 @@ const words = [
         }
     },
 
-    // ---- STANDARD SUPABASE PASSWORD RESET ----
+    // ---- PASSWORD RESET ----
 
-    async sendPasswordResetEmail(email) {
+    async verifyRecoveryPhrase(email, recoveryPhrase) {
         try {
-            const cleanEmail = email.trim().toLowerCase();
-            const redirectTo = typeof window !== 'undefined' && window.location?.origin
-                ? window.location.origin + '/auth.html'
-                : undefined;
+            const { data: users, error } = await window.db
+                .from('users').select('*').eq('email', email.trim().toLowerCase());
 
-            const { data, error } = await window.db.auth.resetPasswordForEmail(cleanEmail, {
-                redirectTo
-            });
-
-            if (error) {
-                const isRateLimit = (error.message || '').toLowerCase().includes('rate limit') ||
-                                    error.status === 429 ||
-                                    error.code === 429 ||
-                                    (error.error_code || '') === 'over_email_send_rate_limit';
-                return {
-                    success: false,
-                    isRateLimit,
-                    error: isRateLimit
-                        ? 'Email rate limit exceeded. Supabase limits outgoing emails on its default email service. Please wait a few minutes before requesting another reset email, or check your spam folder for previous links.'
-                        : error.message
-                };
+            if (error || !users?.length) {
+                return { success: false, error: 'User not found' };
             }
-            return { success: true };
+
+            const user = users[0];
+            const hash = await this.hashPassword(recoveryPhrase.trim());
+
+            if (hash !== user.recovery_phrase_hash) {
+                return { success: false, error: 'Invalid recovery phrase' };
+            }
+
+            const resetToken = crypto.randomUUID();
+            const expiresAt = new Date();
+            expiresAt.setHours(expiresAt.getHours() + 1);
+
+            await window.db.from('password_reset_tokens').insert([{
+                user_id: user.id,
+                token: resetToken,
+                expires_at: expiresAt.toISOString()
+            }]);
+
+            return { success: true, resetToken };
         } catch (err) {
-            console.error('sendPasswordResetEmail error:', err);
-            const isRateLimit = (err.message || '').toLowerCase().includes('rate limit');
-            return {
-                success: false,
-                isRateLimit,
-                error: isRateLimit
-                    ? 'Email rate limit exceeded. Please wait a few minutes before trying again.'
-                    : err.message
-            };
-        }
-    },
-
-    async updatePassword(newPassword) {
-        try {
-            if (!newPassword || newPassword.length < 8) {
-                return { success: false, error: 'Password must be at least 8 characters' };
-            }
-
-            const { data, error } = await window.db.auth.updateUser({
-                password: newPassword
-            });
-
-            if (error) throw error;
-
-            if (data?.user?.id) {
-                try {
-                    const passwordHash = await this.hashPassword(newPassword);
-                    await window.db.from('users').update({ password_hash: passwordHash }).eq('id', data.user.id);
-                } catch (_) {}
-            }
-
-            return { success: true };
-        } catch (err) {
-            console.error('updatePassword error:', err);
+            console.error('verifyRecoveryPhrase error:', err);
             return { success: false, error: err.message };
         }
     },
 
-    async resetPasswordWithPin(email, pin, newPassword) {
+    async resetPassword(resetToken, newPassword) {
         try {
-            const cleanEmail = email.trim().toLowerCase();
-            if (!/^\d{4}$/.test(pin)) {
-                return { success: false, error: 'PIN must be exactly 4 digits' };
-            }
-            if (!newPassword || newPassword.length < 8) {
-                return { success: false, error: 'New password must be at least 8 characters' };
-            }
+            const { data: tokenRow, error: tokenError } = await window.db
+                .from('password_reset_tokens')
+                .select('*')
+                .eq('token', resetToken)
+                .eq('used', false)
+                .gt('expires_at', new Date().toISOString())
+                .single();
 
-            // 1. Fetch user by email
-            const { data: users, error: userError } = await window.db
-                .from('users').select('*').eq('email', cleanEmail);
-
-            if (userError || !users?.length) {
-                return { success: false, error: 'No account found with this email' };
+            if (tokenError || !tokenRow) {
+                return { success: false, error: 'Invalid or expired reset token' };
             }
 
-            const user = users[0];
-
-            if (!user.transaction_pin_hash) {
-                return { success: false, error: 'No transaction PIN has been set for this account' };
-            }
-
-            // 2. Verify PIN
-            const pinOk = await this.verifyPin(pin, user.transaction_pin_hash);
-            if (!pinOk) {
-                return { success: false, error: 'Incorrect 4-digit transaction PIN' };
-            }
-
-            // 3. Update password hash in public.users
             const passwordHash = await this.hashPassword(newPassword);
-            const { error: updateError } = await window.db
-                .from('users').update({ password_hash: passwordHash }).eq('id', user.id);
-
-            if (updateError) throw updateError;
-
-            // 4. Also register/update in Supabase Auth
-            try {
-                await window.db.auth.signUp({
-                    email: cleanEmail,
-                    password: newPassword
-                });
-            } catch (_) {}
+            await window.db.from('users').update({ password_hash: passwordHash }).eq('id', tokenRow.user_id);
+            await window.db.from('password_reset_tokens').update({ used: true }).eq('id', tokenRow.id);
 
             return { success: true };
         } catch (err) {
-            console.error('resetPasswordWithPin error:', err);
+            console.error('resetPassword error:', err);
             return { success: false, error: err.message };
         }
     },
