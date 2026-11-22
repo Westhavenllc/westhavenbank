@@ -22,6 +22,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     await checkSession();
     bindEvents();
     bindFileInputs();
+
+    // Check for password reset tokens in URL query or recovery hash
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = urlParams.get('reset_token') || urlParams.get('token');
+    const hash = window.location.hash || '';
+    const isRecoveryHash = hash.includes('type=recovery') || hash.includes('access_token');
+
+    if (tokenFromUrl || isRecoveryHash) {
+        if (tokenFromUrl) resetToken = tokenFromUrl;
+        openModal('forgotModal');
+        const s1 = document.getElementById('forgotStep1');
+        const s2 = document.getElementById('forgotStep2');
+        if (s1) s1.style.display = 'none';
+        if (s2) s2.style.display = 'block';
+    }
+
+    if (window.db?.auth?.onAuthStateChange) {
+        window.db.auth.onAuthStateChange((event) => {
+            if (event === 'PASSWORD_RECOVERY') {
+                openModal('forgotModal');
+                const s1 = document.getElementById('forgotStep1');
+                const s2 = document.getElementById('forgotStep2');
+                if (s1) s1.style.display = 'none';
+                if (s2) s2.style.display = 'block';
+            }
+        });
+    }
 });
 
 function applyTheme() {
@@ -75,8 +102,8 @@ window.openModal = function(id) {
     m.classList.add('active');
     document.body.style.overflow = 'hidden';
 
-    // Build phrase grid when forgot modal opens
-    if (id === 'forgotModal') { resetForgotForm(); buildAuthPhraseGrid(); }
+    // Reset forgot form when opened normally
+    if (id === 'forgotModal' && !resetToken) { resetForgotForm(); }
 };
 
 window.closeModal = function(id) {
@@ -414,36 +441,78 @@ window.goToDashboard = function() {
 
 // ── FORGOT PASSWORD ───────────────────────────
 
-window.verifyPhrase = async function() {
-    const email  = (document.getElementById('resetEmail') || {}).value.trim();
-    const words  = getAuthPhraseWords();
-    const phrase = words.join(' ').trim();
-    if (!email)              { alert('Please enter your email'); return; }
-    if (words.some(w => !w)) { alert('Please fill in all 12 recovery words'); return; }
+window.sendResetLink = async function() {
+    const email = (document.getElementById('resetEmail') || {}).value.trim();
+    if (!email) { alert('Please enter your email address'); return; }
+    if (!email.includes('@')) { alert('Please enter a valid email address'); return; }
 
-    const result = await Auth.verifyRecoveryPhrase(email, phrase);
+    const btn = document.getElementById('sendResetBtn');
+    const statusEl = document.getElementById('forgotStatus');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending link…'; }
+    if (statusEl) statusEl.innerHTML = '';
+
+    const result = await Auth.requestPasswordReset(email);
     if (result.success) {
-        resetToken = result.resetToken;
-        document.getElementById('forgotStep1').style.display = 'none';
-        document.getElementById('forgotStep2').style.display = 'block';
+        if (statusEl) {
+            statusEl.innerHTML = `<div class="alert alert-success" style="background:#ecfdf5;color:#065f46;border:1.5px solid #10b981;padding:14px 16px;border-radius:10px;font-size:.875rem;margin-top:14px;line-height:1.5;">
+                <div style="display:flex;align-items:flex-start;gap:10px;">
+                    <i class="fas fa-check-circle" style="font-size:1.25rem;color:#059669;margin-top:2px;"></i>
+                    <div>
+                        <div style="font-weight:700;font-size:.95rem;margin-bottom:4px;color:#064e3b;">Reset link sent successfully!</div>
+                        <div>A password reset link has been dispatched to <strong>${email}</strong>.</div>
+                        <div style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border-left:4px solid #059669;border-radius:4px;font-weight:700;color:#065f46;">
+                            <i class="fas fa-exclamation-circle"></i> Please check both your <u>INBOX</u> and <u>SPAM / JUNK FOLDER</u> for your reset link!
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }
+        if (btn) { btn.disabled = false; btn.innerHTML = 'Send Reset Link <i class="fas fa-paper-plane"></i>'; }
     } else {
-        alert(result.error);
+        if (statusEl) {
+            statusEl.innerHTML = `<div class="alert alert-error" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:10px 14px;border-radius:8px;font-size:.875rem;margin-top:10px;">
+                <i class="fas fa-exclamation-circle"></i> ${result.error}
+            </div>`;
+        }
+        if (btn) { btn.disabled = false; btn.innerHTML = 'Send Reset Link <i class="fas fa-paper-plane"></i>'; }
     }
 };
 
 window.resetPassword = async function() {
     const np = document.getElementById('newPassword').value;
     const cf = document.getElementById('confirmPassword').value;
+
+    const hash = window.location.hash || '';
+    const isRecoverySession = hash.includes('type=recovery') || hash.includes('access_token');
+
+    if (!resetToken && !isRecoverySession) {
+        const urlParams = new URLSearchParams(window.location.search);
+        resetToken = urlParams.get('reset_token') || urlParams.get('token');
+    }
+
+    if (!resetToken && !isRecoverySession) {
+        alert('Invalid or missing reset token. Please request a new reset link.');
+        return;
+    }
     if (!np || !cf)    { alert('Please fill in both fields'); return; }
     if (np.length < 8) { alert('Password must be at least 8 characters'); return; }
     if (np !== cf)     { alert('Passwords do not match'); return; }
 
+    const btn = document.getElementById('submitResetBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Resetting…'; }
+
     const result = await Auth.resetPassword(resetToken, np);
     if (result.success) {
-        alert('Password reset! Please sign in with your new password.');
+        alert('Password reset successfully! Please sign in with your new password.');
+        resetToken = '';
         closeModal('forgotModal');
+
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, '', window.location.pathname);
+        }
     } else {
-        alert(result.error);
+        alert(result.error || 'Failed to reset password');
+        if (btn) { btn.disabled = false; btn.innerHTML = 'Reset Password <i class="fas fa-check-circle"></i>'; }
     }
 };
 
@@ -451,8 +520,12 @@ function resetForgotForm() {
     ['resetEmail','newPassword','confirmPassword'].forEach(id => {
         const el = document.getElementById(id); if (el) el.value = '';
     });
-    document.getElementById('forgotStep1').style.display = 'block';
-    document.getElementById('forgotStep2').style.display = 'none';
+    const statusEl = document.getElementById('forgotStatus');
+    if (statusEl) statusEl.innerHTML = '';
+    const s1 = document.getElementById('forgotStep1');
+    const s2 = document.getElementById('forgotStep2');
+    if (s1) s1.style.display = 'block';
+    if (s2) s2.style.display = 'none';
 }
 
 // ── FILE UPLOADS ──────────────────────────────
@@ -588,36 +661,3 @@ function fmtSize(b) {
     return (b / 1048576).toFixed(1) + ' MB';
 }
 
-// ── AUTH PHRASE GRID ──────────────────────────
-
-function buildAuthPhraseGrid() {
-    const container = document.getElementById('forgotPhraseGrid');
-    if (!container) return;
-    let html = '';
-    for (let i = 1; i <= 12; i++) {
-        html += `<div class="phrase-cell">
-            <span class="phrase-num">${i}</span>
-            <input type="text" id="authPhrase_${i}" autocomplete="off"
-                spellcheck="false" autocorrect="off" autocapitalize="off"
-                placeholder="word" onkeydown="authPhraseNav(event,${i})">
-        </div>`;
-    }
-    container.innerHTML = html;
-    setTimeout(() => document.getElementById('authPhrase_1')?.focus(), 100);
-}
-
-function authPhraseNav(e, idx) {
-    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        document.getElementById('authPhrase_' + (idx + 1))?.focus();
-    }
-}
-
-function getAuthPhraseWords() {
-    const words = [];
-    for (let i = 1; i <= 12; i++) {
-        const el = document.getElementById('authPhrase_' + i);
-        words.push(el ? el.value.trim().toLowerCase() : '');
-    }
-    return words;
-}
