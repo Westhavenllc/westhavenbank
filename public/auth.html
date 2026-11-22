@@ -579,39 +579,51 @@
 <div id="forgotModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2>Reset Password</h2>
+            <h2>Forgot Password</h2>
             <button class="modal-close" onclick="closeModal('forgotModal')">&times;</button>
         </div>
         <div class="modal-body">
             <div id="forgotStep1">
-                <div class="form-group">
-                    <label class="form-label">Email</label>
-                    <input type="email" id="resetEmail" class="form-input" placeholder="you@example.com">
+                <p style="font-size:.875rem;color:var(--text-secondary);margin-bottom:14px;">
+                    Enter your account email address below and we will send you a secure password reset link.
+                </p>
+                <div style="background:rgba(37,99,235,0.08);border:1.5px solid var(--accent-primary,#2563eb);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:.85rem;line-height:1.45;color:var(--text-primary);">
+                    <i class="fas fa-envelope" style="color:var(--accent-primary,#2563eb);margin-right:6px;"></i>
+                    <strong>IMPORTANT:</strong> When you request a reset, <strong>please check both your Inbox and your SPAM / JUNK folder</strong> for your reset link!
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Recovery Phrase (12 words — one per box)</label>
-                    <div id="forgotPhraseGrid" class="phrase-grid"></div>
+                    <label class="form-label">Account Email</label>
+                    <input type="email" id="resetEmail" class="form-input" placeholder="you@example.com" required>
                 </div>
-                <button class="btn btn-primary btn-block" style="margin-top:16px;" onclick="verifyPhrase()">Verify Phrase</button>
+                <button class="btn btn-primary btn-block" id="sendResetBtn" style="margin-top:16px;" onclick="sendResetLink()">
+                    Send Reset Link <i class="fas fa-paper-plane"></i>
+                </button>
+                <div id="forgotStatus" style="margin-top:14px;"></div>
             </div>
             <div id="forgotStep2" style="display:none;">
+                <p style="font-size:.875rem;color:var(--text-secondary);margin-bottom:16px;">
+                    Set a new password for your account.
+                </p>
                 <div class="form-group">
                     <label class="form-label">New Password</label>
-                    <input type="password" id="newPassword" class="form-input">
+                    <input type="password" id="newPassword" class="form-input" placeholder="At least 8 characters">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Confirm New Password</label>
-                    <input type="password" id="confirmPassword" class="form-input">
+                    <input type="password" id="confirmPassword" class="form-input" placeholder="Confirm new password">
                 </div>
-                <button class="btn btn-primary btn-block" onclick="resetPassword()">Reset Password</button>
+                <button class="btn btn-primary btn-block" id="submitResetBtn" onclick="resetPassword()">
+                    Reset Password <i class="fas fa-check-circle"></i>
+                </button>
             </div>
         </div>
     </div>
 </div>
 
 
-<!-- Scripts — only the three that exist -->
+<!-- Scripts -->
 <script src="js/supabase.js" defer></script>
+<script src="js/utils/emailService.js" defer></script>
 <script src="js/auth.js" defer></script>
 <script src="js/pages/auth.js" defer></script>
 
