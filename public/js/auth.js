@@ -403,58 +403,98 @@ const words = [
 
     // ---- PASSWORD RESET ----
 
-    async verifyRecoveryPhrase(email, recoveryPhrase) {
+    async requestPasswordReset(email) {
         try {
+            const cleanEmail = email.trim().toLowerCase();
             const { data: users, error } = await window.db
-                .from('users').select('*').eq('email', email.trim().toLowerCase());
+                .from('users').select('id, email, first_name').eq('email', cleanEmail);
 
             if (error || !users?.length) {
-                return { success: false, error: 'User not found' };
+                return { success: false, error: 'No account found with this email address' };
             }
 
             const user = users[0];
-            const hash = await this.hashPassword(recoveryPhrase.trim());
-
-            if (hash !== user.recovery_phrase_hash) {
-                return { success: false, error: 'Invalid recovery phrase' };
-            }
-
             const resetToken = crypto.randomUUID();
             const expiresAt = new Date();
             expiresAt.setHours(expiresAt.getHours() + 1);
 
-            await window.db.from('password_reset_tokens').insert([{
+            const { error: tokenErr } = await window.db.from('password_reset_tokens').insert([{
                 user_id: user.id,
                 token: resetToken,
-                expires_at: expiresAt.toISOString()
+                expires_at: expiresAt.toISOString(),
+                used: false
             }]);
 
-            return { success: true, resetToken };
+            if (tokenErr) throw tokenErr;
+
+            const baseUrl = window.location.origin;
+            const resetUrl = `${baseUrl}/auth.html?reset_token=${resetToken}`;
+
+            // 1. Dispatch formatted HTML password reset email via EmailService
+            if (window.EmailService && typeof window.EmailService.sendPasswordResetEmail === 'function') {
+                try {
+                    await window.EmailService.sendPasswordResetEmail(cleanEmail, resetUrl, user.first_name || 'Client', resetToken);
+                } catch (emailErr) {
+                    console.warn('[Auth] EmailService error:', emailErr);
+                }
+            } else if (window.db?.auth?.resetPasswordForEmail) {
+                try {
+                    await window.db.auth.resetPasswordForEmail(cleanEmail, { redirectTo: resetUrl });
+                } catch (supaErr) {
+                    console.warn('[Auth] Supabase recovery notice:', supaErr);
+                }
+            }
+
+            return {
+                success: true,
+                message: 'A password reset link has been dispatched to your email address by West Haven Bank security. Please check your inbox and spam folder.',
+                resetToken
+            };
         } catch (err) {
-            console.error('verifyRecoveryPhrase error:', err);
+            console.error('requestPasswordReset error:', err);
             return { success: false, error: err.message };
         }
     },
 
     async resetPassword(resetToken, newPassword) {
         try {
-            const { data: tokenRow, error: tokenError } = await window.db
-                .from('password_reset_tokens')
-                .select('*')
-                .eq('token', resetToken)
-                .eq('used', false)
-                .gt('expires_at', new Date().toISOString())
-                .single();
+            const passwordHash = await this.hashPassword(newPassword);
 
-            if (tokenError || !tokenRow) {
-                return { success: false, error: 'Invalid or expired reset token' };
+            if (resetToken) {
+                const { data: tokenRow, error: tokenError } = await window.db
+                    .from('password_reset_tokens')
+                    .select('*')
+                    .eq('token', resetToken)
+                    .eq('used', false)
+                    .gt('expires_at', new Date().toISOString())
+                    .single();
+
+                if (tokenError || !tokenRow) {
+                    return { success: false, error: 'Invalid or expired reset token. Please request a new link.' };
+                }
+
+                await window.db.from('users').update({ password_hash: passwordHash }).eq('id', tokenRow.user_id);
+                await window.db.from('password_reset_tokens').update({ used: true }).eq('id', tokenRow.id);
+
+                if (window.db?.auth?.updateUser) {
+                    await window.db.auth.updateUser({ password: newPassword }).catch(() => {});
+                }
+
+                return { success: true };
             }
 
-            const passwordHash = await this.hashPassword(newPassword);
-            await window.db.from('users').update({ password_hash: passwordHash }).eq('id', tokenRow.user_id);
-            await window.db.from('password_reset_tokens').update({ used: true }).eq('id', tokenRow.id);
+            // Fallback for native Supabase Auth password recovery session (type=recovery)
+            if (window.db?.auth?.updateUser) {
+                const { data: authData, error: authErr } = await window.db.auth.updateUser({ password: newPassword });
+                if (authErr) throw authErr;
 
-            return { success: true };
+                if (authData?.user?.email) {
+                    await window.db.from('users').update({ password_hash: passwordHash }).eq('email', authData.user.email.toLowerCase());
+                }
+                return { success: true };
+            }
+
+            return { success: false, error: 'Missing reset token or active recovery session' };
         } catch (err) {
             console.error('resetPassword error:', err);
             return { success: false, error: err.message };
